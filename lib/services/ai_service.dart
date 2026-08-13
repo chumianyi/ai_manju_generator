@@ -216,7 +216,7 @@ class AiService {
   }
 
   /// 生成分镜
-  Stream<String> generateShotsStream(String script) async {
+  Stream<String> generateShotsStream(String script) async* {
     clearHistory();
     final systemPrompt = TagParser.buildShotSystemPrompt();
 
