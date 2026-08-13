@@ -11,11 +11,8 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 
-subprojects {
-    project.evaluationDependsOn(":app")
-}
-
 // 兼容旧版 Flutter 插件包（使用 android.flutter.xxx 语法）
+// 必须在 evaluationDependsOn 之前配置
 subprojects {
     afterEvaluate { project ->
         if (project.hasProperty('android')) {
@@ -25,6 +22,10 @@ subprojects {
             }
         }
     }
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
 }
 
 class FlutterCompat {
