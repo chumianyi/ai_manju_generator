@@ -22,6 +22,9 @@ dependencies:
   image_gallery_saver_plus: ^3.0.0
   dio: ^5.4.3+1
 
+dependency_overrides:
+  package_info_plus: 8.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
