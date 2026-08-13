@@ -27,6 +27,7 @@ class AiManjuApp extends StatefulWidget {
 class _AiManjuAppState extends State<AiManjuApp> {
   AiConfig _config = AiConfig();
   bool _isLoading = true;
+  int _currentIndex = 0;
   ThemeMode _themeMode = ThemeMode.system;
 
   @override
@@ -58,25 +59,38 @@ class _AiManjuAppState extends State<AiManjuApp> {
       );
     }
 
+    final pages = [
+      HomeScreen(config: _config, onOpenConfig: () => setState(() => _currentIndex = 1)),
+      ConfigScreen(config: _config, onSave: _onConfigSaved),
+    ];
+
     return MaterialApp(
       title: 'AI 漫剧生成器',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme(null),
       darkTheme: AppTheme.darkTheme(null),
       themeMode: _themeMode,
-      home: HomeScreen(
-        config: _config,
-        onOpenConfig: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ConfigScreen(
-                config: _config,
-                onSave: _onConfigSaved,
-              ),
+      home: Scaffold(
+        body: IndexedStack(
+          index: _currentIndex,
+          children: pages,
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _currentIndex,
+          onDestinationSelected: (index) => setState(() => _currentIndex = index),
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.movie_outlined),
+              selectedIcon: Icon(Icons.movie),
+              label: '漫剧',
             ),
-          );
-        },
+            NavigationDestination(
+              icon: Icon(Icons.api_outlined),
+              selectedIcon: Icon(Icons.api),
+              label: 'API',
+            ),
+          ],
+        ),
       ),
     );
   }

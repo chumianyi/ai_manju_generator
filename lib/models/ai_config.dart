@@ -29,8 +29,8 @@ class AiConfig {
   bool isThinkModel;
 
   AiConfig({
-    this.llmBaseUrl = 'https://api.openai.com/v1',
-    this.llmModel = 'gpt-4o',
+    this.llmBaseUrl = '',
+    this.llmModel = '',
     this.llmApiKey = '',
     Map<String, String>? llmHeaders,
     this.videoBaseUrl = '',

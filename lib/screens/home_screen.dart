@@ -111,12 +111,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('AI 漫剧生成器'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: widget.onOpenConfig,
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
