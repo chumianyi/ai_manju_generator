@@ -1,13 +1,14 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter/return_code.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import '../models/shot.dart';
 import 'ai_service.dart';
 
 /// 视频服务 - 生成、下载、合并、保存
 class VideoService {
+  static const _channel = MethodChannel('com.qmchat.ai_manju_generator/video');
+
   final AiService aiService;
 
   VideoService(this.aiService);
@@ -32,7 +33,6 @@ class VideoService {
   }) async {
     shot.isGenerating = true;
     shot.error = null;
-
     try {
       // 1. 生成视频提示词（多轮累积，流式）
       onStatus?.call('正在生成镜头${shot.index}的视频提示词...');
@@ -58,7 +58,6 @@ class VideoService {
       // 3. 获取视频URL（不同API返回格式不同，做兼容处理）
       String? videoUrl;
       String? taskId;
-
       if (result['data'] != null && result['data'] is List) {
         final data = result['data'][0];
         videoUrl = data['url'] ?? data['video_url'];
@@ -80,7 +79,6 @@ class VideoService {
             final status = await aiService.getVideoTaskStatus(taskId);
             final state = status['status'] ?? status['state'];
             onProgress?.call(0.5 + (i / 60) * 0.4);
-
             if (state == 'succeeded' || state == 'completed' || state == 'success') {
               if (status['data'] != null && status['data'] is List) {
                 videoUrl = status['data'][0]['url'];
@@ -100,7 +98,6 @@ class VideoService {
       if (videoUrl == null) {
         throw Exception('无法获取视频URL');
       }
-
       shot.videoUrl = videoUrl;
       onProgress?.call(0.9);
 
@@ -111,7 +108,6 @@ class VideoService {
       final savePath = '$appDir/$fileName';
       await aiService.downloadVideo(videoUrl, savePath);
       shot.videoPath = savePath;
-
       shot.isCompleted = true;
       onProgress?.call(1.0);
       onStatus?.call('镜头${shot.index}生成完成');
@@ -121,12 +117,11 @@ class VideoService {
       onStatus?.call('镜头${shot.index}生成失败: $e');
       rethrow;
     }
-
     shot.isGenerating = false;
     return shot;
   }
 
-  /// 合并多个视频为一个
+  /// 合并多个视频为一个（通过原生 MediaMuxer 实现）
   Future<String> mergeVideos(List<Shot> shots, String outputName) async {
     final videoPaths = shots
         .where((s) => s.videoPath != null && File(s.videoPath!).existsSync())
@@ -137,35 +132,28 @@ class VideoService {
       throw Exception('没有可合并的视频');
     }
 
+    if (videoPaths.length == 1) {
+      // 只有一个视频，直接复制
+      final appDir = await getAppDir();
+      final outputPath = '$appDir/$outputName';
+      await File(videoPaths.first).copy(outputPath);
+      return outputPath;
+    }
+
     final appDir = await getAppDir();
     final outputPath = '$appDir/$outputName';
 
-    // 创建 concat 文件列表
-    final listFile = File('$appDir/concat_list_${DateTime.now().millisecondsSinceEpoch}.txt');
-    final listContent = videoPaths.map((p) => "file '$p'").join('\n');
-    await listFile.writeAsString(listContent);
-
     try {
-      // 使用 ffmpeg concat 合并
-      final command = '-f concat -safe 0 -i ${listFile.path} -c copy $outputPath';
-      final session = await FFmpegKit.execute(command);
-      final returnCode = await session.getReturnCode();
-
-      if (!ReturnCode.isSuccess(returnCode)) {
-        // 如果 copy 失败，尝试重新编码
-        final command2 = '-f concat -safe 0 -i ${listFile.path} -c:v libx264 -c:a aac $outputPath';
-        final session2 = await FFmpegKit.execute(command2);
-        final returnCode2 = await session2.getReturnCode();
-        if (!ReturnCode.isSuccess(returnCode2)) {
-          throw Exception('视频合并失败');
-        }
+      final result = await _channel.invokeMethod<String>('mergeVideos', {
+        'videoPaths': videoPaths,
+        'outputPath': outputPath,
+      });
+      if (result != null && result.isNotEmpty) {
+        return result;
       }
-
-      return outputPath;
-    } finally {
-      if (await listFile.exists()) {
-        await listFile.delete();
-      }
+      throw Exception('合并失败');
+    } on PlatformException catch (e) {
+      throw Exception('视频合并失败: ${e.message}');
     }
   }
 
