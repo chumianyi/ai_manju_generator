@@ -12,14 +12,11 @@ subprojects {
 }
 
 // 兼容旧版 Flutter 插件包（使用 android.flutter.xxx 语法）
-// 必须在 evaluationDependsOn 之前配置
-subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty('android')) {
-            def androidExt = project.android
-            if (!androidExt.extensions.findByName('flutter')) {
-                androidExt.extensions.create('flutter', FlutterCompat)
-            }
+// 在 android 插件应用后立即注入，必须早于子项目 build.gradle 执行
+subprojects { project ->
+    project.plugins.withId('com.android.library') {
+        if (!project.android.extensions.findByName('flutter')) {
+            project.android.extensions.create('flutter', FlutterCompat)
         }
     }
 }
