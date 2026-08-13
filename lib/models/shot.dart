@@ -1,3 +1,12 @@
+/// 镜头生成状态
+enum ShotStatus {
+  pending,      // 等待中
+  queued,       // 队列中
+  generating,   // 生成中
+  completed,    // 已完成
+  failed,       // 失败
+}
+
 /// 单个分镜
 class Shot {
   int index;
@@ -6,9 +15,13 @@ class Shot {
   String? videoPrompt; // 视频生成提示词
   String? videoPath; // 生成的视频本地路径
   String? videoUrl; // 视频URL
-  bool isGenerating;
-  bool isCompleted;
+  double progress; // 生成进度 0.0 - 1.0
+  ShotStatus status; // 生成状态
   String? error;
+
+  // 兼容旧字段
+  bool get isGenerating => status == ShotStatus.generating;
+  bool get isCompleted => status == ShotStatus.completed;
 
   Shot({
     required this.index,
@@ -17,8 +30,8 @@ class Shot {
     this.videoPrompt,
     this.videoPath,
     this.videoUrl,
-    this.isGenerating = false,
-    this.isCompleted = false,
+    this.progress = 0.0,
+    this.status = ShotStatus.pending,
     this.error,
   });
 
@@ -29,8 +42,8 @@ class Shot {
         'videoPrompt': videoPrompt,
         'videoPath': videoPath,
         'videoUrl': videoUrl,
-        'isGenerating': isGenerating,
-        'isCompleted': isCompleted,
+        'progress': progress,
+        'status': status.index,
         'error': error,
       };
 
@@ -41,8 +54,10 @@ class Shot {
         videoPrompt: json['videoPrompt'],
         videoPath: json['videoPath'],
         videoUrl: json['videoUrl'],
-        isGenerating: json['isGenerating'] ?? false,
-        isCompleted: json['isCompleted'] ?? false,
+        progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+        status: json['status'] != null
+            ? ShotStatus.values[json['status']]
+            : (json['isCompleted'] == true ? ShotStatus.completed : ShotStatus.pending),
         error: json['error'],
       );
 }

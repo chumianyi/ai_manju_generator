@@ -11,6 +11,17 @@ import '../widgets/shot_card.dart';
 import '../widgets/video_player_widget.dart';
 import 'video_detail_screen.dart';
 
+/// 清晰度选项
+const List<Map<String, String>> _qualityOptions = [
+  {'label': '标清 480p', 'value': '480p'},
+  {'label': '高清 720p', 'value': '720p'},
+  {'label': '全高清 1080p', 'value': '1080p'},
+  {'label': '4K 超高清', 'value': '4K'},
+];
+
+/// 并发数选项
+const List<int> _concurrencyOptions = [1, 2, 3, 4, 5, 8, 10];
+
 /// 视频生成页面
 class GenerateScreen extends StatefulWidget {
   final AiConfig config;
@@ -36,7 +47,10 @@ class _GenerateScreenState extends State<GenerateScreen> {
   bool _isMerging = false;
   String _statusText = '准备就绪';
   double _overallProgress = 0;
-  int _currentShotIndex = -1;
+
+  // 设置项
+  String _selectedQuality = '720p';
+  int _concurrency = 2;
 
   @override
   void initState() {
@@ -47,14 +61,82 @@ class _GenerateScreenState extends State<GenerateScreen> {
     _shots = List.from(_project.shots);
   }
 
-  // 逐个生成所有视频
+  /// 显示友好的错误对话框
+  void _showErrorDialog(Object error) {
+    String title = '生成失败';
+    String message = error.toString();
+    bool canRetry = false;
+
+    if (error is AiException) {
+      switch (error.type) {
+        case AiErrorType.rateLimit:
+          title = '当前使用人数过多';
+          message = '服务器繁忙，请稍后重试。\n建议降低并发数或等待几分钟后再试。';
+          canRetry = true;
+          break;
+        case AiErrorType.invalidApiKey:
+          title = 'API Key 无效';
+          message = '请检查 API 配置中的 Key 是否正确。';
+          break;
+        case AiErrorType.networkError:
+          title = '网络连接失败';
+          message = '请检查网络连接后重试。';
+          canRetry = true;
+          break;
+        case AiErrorType.modelNotFound:
+          title = '模型不存在';
+          message = '请检查模型名称是否正确，或在 API 配置中选择其他模型。';
+          break;
+        case AiErrorType.serverError:
+          title = '服务器繁忙';
+          message = '服务器暂时无法响应，请稍后重试。';
+          canRetry = true;
+          break;
+        case AiErrorType.unknown:
+          title = '生成失败';
+          message = error.message;
+          break;
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          if (canRetry)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _generateAllVideos();
+              },
+              child: const Text('重试'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 并发生成所有视频
   Future<void> _generateAllVideos() async {
     if (_isGenerating) return;
 
-    // 检查视频模型配置
     if (widget.config.videoBaseUrl.isEmpty || widget.config.videoModel.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在设置中配置视频模型')),
+        const SnackBar(content: Text('请先在 API 配置中配置视频模型')),
+      );
+      return;
+    }
+
+    final pendingCount = _shots.where((s) => s.status != ShotStatus.completed).length;
+    if (pendingCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('所有镜头已生成完成')),
       );
       return;
     }
@@ -62,79 +144,64 @@ class _GenerateScreenState extends State<GenerateScreen> {
     setState(() {
       _isGenerating = true;
       _overallProgress = 0;
+      _statusText = '正在生成视频...';
     });
 
-    final total = _shots.length;
+    try {
+      await _videoService.generateAllVideosConcurrent(
+        _shots,
+        _project.style,
+        _project.aspectRatio,
+        quality: _selectedQuality,
+        concurrency: _concurrency,
+        onStatus: (status) {
+          if (mounted) setState(() => _statusText = status);
+        },
+        onOverallProgress: (completed, total, progress) {
+          if (mounted) {
+            setState(() {
+              _overallProgress = progress;
+              _statusText = '已完成 $completed/$total';
+            });
+          }
+        },
+        onShotComplete: (shot) {
+          if (mounted) setState(() {});
+          _project.shots = _shots;
+          StorageService.saveProject(_project);
+        },
+        onShotError: (shot, error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('镜头${shot.index}失败: ${error.toString().length > 50 ? error.toString().substring(0, 50) + '...' : error}')),
+            );
+          }
+        },
+      );
 
-    for (var i = 0; i < total; i++) {
-      if (!_isGenerating) break;
-
-      final shot = _shots[i];
-      if (shot.isCompleted && shot.videoPath != null) {
-        // 已生成的跳过
+      if (mounted) {
         setState(() {
-          _overallProgress = (i + 1) / total;
+          _isGenerating = false;
+          _statusText = _overallProgress >= 1.0 ? '全部生成完成' : '生成结束';
         });
-        continue;
       }
-
-      setState(() {
-        _currentShotIndex = i;
-        _statusText = '正在生成镜头 ${shot.index}...';
-      });
-
-      try {
-        await _videoService.generateShotVideo(
-          shot,
-          _project.style,
-          _project.aspectRatio,
-          onStatus: (status) {
-            if (mounted) setState(() => _statusText = status);
-          },
-          onProgress: (progress) {
-            if (mounted) {
-              setState(() {
-                _overallProgress = (i + progress) / total;
-              });
-            }
-          },
-        );
-
-        setState(() {
-          _shots[i] = shot;
-          _overallProgress = (i + 1) / total;
-        });
-
-        // 保存进度
-        _project.shots = _shots;
-        await StorageService.saveProject(_project);
-      } catch (e) {
-        // 继续下一个
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('镜头${shot.index}失败: $e')),
-          );
-        }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isGenerating = false);
+        _showErrorDialog(e);
       }
-    }
-
-    if (mounted) {
-      setState(() {
-        _isGenerating = false;
-        _currentShotIndex = -1;
-        _statusText = _overallProgress >= 1.0 ? '全部生成完成' : '已停止';
-      });
     }
   }
 
   // 停止生成
   void _stopGeneration() {
     setState(() => _isGenerating = false);
+    _statusText = '已停止';
   }
 
   // 合并视频
   Future<void> _mergeVideos() async {
-    final completedShots = _shots.where((s) => s.isCompleted && s.videoPath != null).toList();
+    final completedShots = _shots.where((s) => s.status == ShotStatus.completed && s.videoPath != null).toList();
     if (completedShots.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('没有可合并的视频')),
@@ -143,7 +210,6 @@ class _GenerateScreenState extends State<GenerateScreen> {
     }
 
     setState(() => _isMerging = true);
-
     try {
       final outputName = 'merged_${DateTime.now().millisecondsSinceEpoch}.mp4';
       final mergedPath = await _videoService.mergeVideos(completedShots, outputName);
@@ -152,9 +218,8 @@ class _GenerateScreenState extends State<GenerateScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('合并完成: $mergedPath')),
+          const SnackBar(content: Text('合并完成')),
         );
-        // 跳转到详情页
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -164,9 +229,7 @@ class _GenerateScreenState extends State<GenerateScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('合并失败: $e')),
-        );
+        _showErrorDialog(e);
       }
     } finally {
       if (mounted) setState(() => _isMerging = false);
@@ -211,14 +274,86 @@ class _GenerateScreenState extends State<GenerateScreen> {
     }
   }
 
+  // 显示设置对话框
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('生成设置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('视频清晰度', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _qualityOptions.map((q) {
+                return ChoiceChip(
+                  label: Text(q['label']!),
+                  selected: _selectedQuality == q['value'],
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() => _selectedQuality = q['value']!);
+                      Navigator.pop(context);
+                      _showSettingsDialog();
+                    }
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            const Text('并发数量（同时生成几个视频）', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: _concurrencyOptions.map((c) {
+                return ChoiceChip(
+                  label: Text('$c 个'),
+                  selected: _concurrency == c,
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() => _concurrency = c);
+                      Navigator.pop(context);
+                      _showSettingsDialog();
+                    }
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '并发数越高生成越快，但可能触发 API 限流',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final completedCount = _shots.where((s) => s.isCompleted).length;
-
+    final completedCount = _shots.where((s) => s.status == ShotStatus.completed).length;
     return Scaffold(
       appBar: AppBar(
         title: Text(_project.title),
         actions: [
+          // 设置按钮
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _isGenerating ? null : _showSettingsDialog,
+            tooltip: '生成设置',
+          ),
           // 右上角进度条
           Padding(
             padding: const EdgeInsets.only(right: 16),
@@ -232,12 +367,30 @@ class _GenerateScreenState extends State<GenerateScreen> {
       ),
       body: Column(
         children: [
+          // 设置信息条
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Theme.of(context).colorScheme.surfaceContainer,
+            child: Row(
+              children: [
+                Icon(Icons.high_quality, size: 16, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 4),
+                Text(_qualityOptions.firstWhere((q) => q['value'] == _selectedQuality)['label']!, style: const TextStyle(fontSize: 12)),
+                const SizedBox(width: 16),
+                Icon(Icons.bolt, size: 16, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 4),
+                Text('$_concurrency 并发', style: const TextStyle(fontSize: 12)),
+                const Spacer(),
+                Text('${(_overallProgress * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
           // 状态条
           if (_isGenerating || _statusText != '准备就绪')
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: Theme.of(context).colorScheme.surfaceContainer,
               child: Row(
                 children: [
                   if (_isGenerating)
@@ -263,7 +416,16 @@ class _GenerateScreenState extends State<GenerateScreen> {
                 ],
               ),
             ),
-
+          // 整体进度条
+          if (_isGenerating)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: LinearProgressIndicator(
+                value: _overallProgress,
+                minHeight: 4,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
           // 合并视频区域
           if (_project.mergedVideoPath != null)
             Card(
@@ -296,7 +458,6 @@ class _GenerateScreenState extends State<GenerateScreen> {
                 ),
               ),
             ),
-
           // 镜头列表
           Expanded(
             child: ListView.builder(
@@ -304,80 +465,7 @@ class _GenerateScreenState extends State<GenerateScreen> {
               itemCount: _shots.length,
               itemBuilder: (context, index) {
                 final shot = _shots[index];
-                return Column(
-                  children: [
-                    ShotCard(
-                      shot: shot,
-                      showVideo: false,
-                    ),
-                    // 视频预览缩略
-                    if (shot.videoPath != null && File(shot.videoPath!).existsSync())
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => VideoDetailScreen(
-                                  videoPath: shot.videoPath!,
-                                ),
-                              ),
-                            );
-                          },
-                          child: Container(
-                            height: 180,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                VideoPlayerWidget(videoPath: shot.videoPath!),
-                                if (index == _currentShotIndex && _isGenerating)
-                                  Container(
-                                    color: Colors.black54,
-                                    child: const Center(
-                                      child: CircularProgressIndicator(),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    // 操作按钮
-                    if (shot.isCompleted && shot.videoPath != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Row(
-                          children: [
-                            TextButton.icon(
-                              onPressed: () => _saveVideo(shot),
-                              icon: const Icon(Icons.save_alt, size: 18),
-                              label: const Text('保存'),
-                            ),
-                            TextButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => VideoDetailScreen(
-                                      videoPath: shot.videoPath!,
-                                    ),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.zoom_in, size: 18),
-                              label: const Text('放大'),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                );
+                return _buildShotItem(shot);
               },
             ),
           ),
@@ -418,6 +506,151 @@ class _GenerateScreenState extends State<GenerateScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildShotItem(Shot shot) {
+    return Column(
+      children: [
+        ShotCard(
+          shot: shot,
+          showVideo: false,
+        ),
+        // 进度条（生成中或队列中时显示）
+        if (shot.status == ShotStatus.generating || shot.status == ShotStatus.queued)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      shot.status == ShotStatus.generating ? Icons.hourglass_empty : Icons.schedule,
+                      size: 14,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      shot.status == ShotStatus.generating ? '生成中 ${(shot.progress * 100).toStringAsFixed(0)}%' : '等待中...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (shot.status == ShotStatus.generating)
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: shot.progress,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                LinearProgressIndicator(
+                  value: shot.status == ShotStatus.generating ? shot.progress : 0,
+                  minHeight: 3,
+                  borderRadius: BorderRadius.circular(1.5),
+                ),
+              ],
+            ),
+          ),
+        // 失败提示
+        if (shot.status == ShotStatus.failed)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.error_outline, size: 16, color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      shot.error ?? '生成失败',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onErrorContainer),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        // 视频预览
+        if (shot.videoPath != null && File(shot.videoPath!).existsSync())
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => VideoDetailScreen(
+                      videoPath: shot.videoPath!,
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                height: 180,
+                margin: const EdgeInsets.only(bottom: 8, top: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    VideoPlayerWidget(videoPath: shot.videoPath!),
+                    if (shot.status == ShotStatus.generating)
+                      Container(
+                        color: Colors.black54,
+                        child: const Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        // 操作按钮
+        if (shot.status == ShotStatus.completed && shot.videoPath != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                TextButton.icon(
+                  onPressed: () => _saveVideo(shot),
+                  icon: const Icon(Icons.save_alt, size: 18),
+                  label: const Text('保存'),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => VideoDetailScreen(
+                          videoPath: shot.videoPath!,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.zoom_in, size: 18),
+                  label: const Text('放大'),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

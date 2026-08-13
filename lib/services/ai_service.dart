@@ -6,6 +6,131 @@ import '../models/ai_config.dart';
 import '../models/shot.dart';
 import '../utils/parser.dart';
 
+/// AI 错误类型
+enum AiErrorType {
+  rateLimit,      // 使用人数过多/限流
+  invalidApiKey,  // API Key 无效
+  networkError,   // 网络错误
+  modelNotFound,  // 模型不存在
+  serverError,    // 服务器错误
+  unknown,        // 未知错误
+}
+
+/// AI 异常 - 友好的错误信息
+class AiException implements Exception {
+  final AiErrorType type;
+  final String message;
+  final int? statusCode;
+  final String? rawBody;
+
+  AiException({
+    required this.type,
+    required this.message,
+    this.statusCode,
+    this.rawBody,
+  });
+
+  @override
+  String toString() => message;
+
+  /// 是否可以重试
+  bool get canRetry => type == AiErrorType.rateLimit || type == AiErrorType.networkError || type == AiErrorType.serverError;
+}
+
+/// 从 HTTP 响应识别错误类型
+AiException _parseHttpError(int statusCode, String body) {
+  final lowerBody = body.toLowerCase();
+
+  // 429 限流
+  if (statusCode == 429) {
+    return AiException(
+      type: AiErrorType.rateLimit,
+      message: '当前使用人数过多，请稍后重试',
+      statusCode: statusCode,
+      rawBody: body,
+    );
+  }
+
+  // 401/403 API Key 错误
+  if (statusCode == 401 || statusCode == 403) {
+    if (lowerBody.contains('invalid') || lowerBody.contains('unauthorized') || lowerBody.contains('api_key') || lowerBody.contains('key')) {
+      return AiException(
+        type: AiErrorType.invalidApiKey,
+        message: 'API Key 无效，请检查配置',
+        statusCode: statusCode,
+        rawBody: body,
+      );
+    }
+  }
+
+  // 404 模型不存在
+  if (statusCode == 404) {
+    if (lowerBody.contains('model') || lowerBody.contains('not found') || lowerBody.contains('不存在')) {
+      return AiException(
+        type: AiErrorType.modelNotFound,
+        message: '模型不存在，请检查模型名称',
+        statusCode: statusCode,
+        rawBody: body,
+      );
+    }
+    return AiException(
+      type: AiErrorType.modelNotFound,
+      message: 'API 地址不存在，请检查 API 地址是否正确',
+      statusCode: statusCode,
+      rawBody: body,
+    );
+  }
+
+  // 5xx 服务器错误
+  if (statusCode >= 500) {
+    return AiException(
+      type: AiErrorType.serverError,
+      message: '服务器繁忙，请稍后重试',
+      statusCode: statusCode,
+      rawBody: body,
+    );
+  }
+
+  // 检查 body 中的限流关键词
+  if (lowerBody.contains('rate limit') ||
+      lowerBody.contains('rate_limit') ||
+      lowerBody.contains('too many requests') ||
+      lowerBody.contains('使用人数过多') ||
+      lowerBody.contains('排队') ||
+      lowerBody.contains('繁忙') ||
+      lowerBody.contains('concurrent') ||
+      lowerBody.contains('quota')) {
+    return AiException(
+      type: AiErrorType.rateLimit,
+      message: '当前使用人数过多，请稍后重试',
+      statusCode: statusCode,
+      rawBody: body,
+    );
+  }
+
+  // 检查 API Key 错误关键词
+  if (lowerBody.contains('invalid api key') ||
+      lowerBody.contains('incorrect api key') ||
+      lowerBody.contains('api key not found') ||
+      lowerBody.contains('invalid key') ||
+      lowerBody.contains('密钥') ||
+      lowerBody.contains('key无效')) {
+    return AiException(
+      type: AiErrorType.invalidApiKey,
+      message: 'API Key 无效，请检查配置',
+      statusCode: statusCode,
+      rawBody: body,
+    );
+  }
+
+  return AiException(
+    type: AiErrorType.unknown,
+    message: '请求失败 ($statusCode): ${body.length > 200 ? body.substring(0, 200) : body}',
+    statusCode: statusCode,
+    rawBody: body,
+  );
+}
+
 /// 聊天消息
 class ChatMessage {
   final String role; // system, user, assistant
@@ -126,7 +251,7 @@ class AiService {
 
     if (response.statusCode != 200) {
       final errorBody = await response.stream.bytesToString();
-      throw Exception('API请求失败 (${response.statusCode}): $errorBody');
+      throw _parseHttpError(response.statusCode, errorBody);
     }
 
     final completer = Completer<void>();
@@ -261,9 +386,21 @@ class AiService {
   }
 
   /// 调用视频模型生成视频
+  /// 根据比例和清晰度计算分辨率
+  String _calcResolution(String aspectRatio, String quality) {
+    final resolutions = {
+      '480p': {'9:16': '480x854', '16:9': '854x480', '1:1': '480x480'},
+      '720p': {'9:16': '720x1280', '16:9': '1280x720', '1:1': '720x720'},
+      '1080p': {'9:16': '1080x1920', '16:9': '1920x1080', '1:1': '1080x1080'},
+      '4K': {'9:16': '2160x3840', '16:9': '3840x2160', '1:1': '2160x2160'},
+    };
+    return resolutions[quality]?[aspectRatio] ?? '720x1280';
+  }
+
   Future<Map<String, dynamic>> generateVideo({
     required String prompt,
     required String aspectRatio,
+    String quality = '720p',
     String? style,
   }) async {
     final baseUrl = config.videoBaseUrl.endsWith('/')
@@ -276,11 +413,8 @@ class AiService {
     final body = jsonEncode({
       'model': config.videoModel,
       'prompt': prompt,
-      'size': aspectRatio == '9:16'
-          ? '720x1280'
-          : aspectRatio == '16:9'
-              ? '1280x720'
-              : '1024x1024',
+      'size': _calcResolution(aspectRatio, quality),
+      'quality': quality,
       if (style != null) 'style': style,
     });
 
@@ -291,7 +425,7 @@ class AiService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('视频生成失败 (${response.statusCode}): ${response.body}');
+      throw _parseHttpError(response.statusCode, response.body);
     }
 
     return jsonDecode(response.body);
@@ -309,7 +443,7 @@ class AiService {
     final response = await http.get(uri, headers: headers);
 
     if (response.statusCode != 200) {
-      throw Exception('查询任务失败 (${response.statusCode}): ${response.body}');
+      throw _parseHttpError(response.statusCode, response.body);
     }
 
     return jsonDecode(response.body);

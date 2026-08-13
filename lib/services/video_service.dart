@@ -8,7 +8,6 @@ import 'ai_service.dart';
 /// 视频服务 - 生成、下载、合并、保存
 class VideoService {
   static const _channel = MethodChannel('com.qmchat.ai_manju_generator/video');
-
   final AiService aiService;
 
   VideoService(this.aiService);
@@ -28,14 +27,20 @@ class VideoService {
     Shot shot,
     String style,
     String aspectRatio, {
+    String quality = '720p',
     Function(String)? onStatus,
     Function(double)? onProgress,
   }) async {
-    shot.isGenerating = true;
+    shot.status = ShotStatus.generating;
     shot.error = null;
+    shot.progress = 0.0;
+
     try {
       // 1. 生成视频提示词（多轮累积，流式）
       onStatus?.call('正在生成镜头${shot.index}的视频提示词...');
+      shot.progress = 0.05;
+      onProgress?.call(0.05);
+
       final prompt = await aiService.generateVideoPrompt(
         shot,
         style,
@@ -44,6 +49,7 @@ class VideoService {
         },
       );
       shot.videoPrompt = prompt;
+      shot.progress = 0.3;
       onProgress?.call(0.3);
 
       // 2. 调用视频生成API
@@ -51,9 +57,11 @@ class VideoService {
       final result = await aiService.generateVideo(
         prompt: prompt,
         aspectRatio: aspectRatio,
+        quality: quality,
         style: style,
       );
-      onProgress?.call(0.5);
+      shot.progress = 0.4;
+      onProgress?.call(0.4);
 
       // 3. 获取视频URL（不同API返回格式不同，做兼容处理）
       String? videoUrl;
@@ -78,7 +86,15 @@ class VideoService {
           try {
             final status = await aiService.getVideoTaskStatus(taskId);
             final state = status['status'] ?? status['state'];
-            onProgress?.call(0.5 + (i / 60) * 0.4);
+            // 尝试从API获取真实进度
+            final apiProgress = status['progress'] ?? status['percent'] ?? status['percentage'];
+            if (apiProgress != null && apiProgress is num) {
+              shot.progress = 0.4 + (apiProgress / 100) * 0.5;
+            } else {
+              shot.progress = 0.4 + (i / 60) * 0.5;
+            }
+            onProgress?.call(shot.progress);
+
             if (state == 'succeeded' || state == 'completed' || state == 'success') {
               if (status['data'] != null && status['data'] is List) {
                 videoUrl = status['data'][0]['url'];
@@ -99,6 +115,7 @@ class VideoService {
         throw Exception('无法获取视频URL');
       }
       shot.videoUrl = videoUrl;
+      shot.progress = 0.9;
       onProgress?.call(0.9);
 
       // 5. 下载视频到本地
@@ -108,17 +125,86 @@ class VideoService {
       final savePath = '$appDir/$fileName';
       await aiService.downloadVideo(videoUrl, savePath);
       shot.videoPath = savePath;
-      shot.isCompleted = true;
+      shot.status = ShotStatus.completed;
+      shot.progress = 1.0;
       onProgress?.call(1.0);
       onStatus?.call('镜头${shot.index}生成完成');
     } catch (e) {
       shot.error = e.toString();
-      shot.isGenerating = false;
+      shot.status = ShotStatus.failed;
       onStatus?.call('镜头${shot.index}生成失败: $e');
       rethrow;
     }
-    shot.isGenerating = false;
     return shot;
+  }
+
+  /// 并发生成所有镜头视频
+  /// [concurrency] 并发数，同时生成多少个视频
+  /// 返回成功生成的镜头列表
+  Future<List<Shot>> generateAllVideosConcurrent(
+    List<Shot> shots,
+    String style,
+    String aspectRatio, {
+    String quality = '720p',
+    int concurrency = 2,
+    Function(String)? onStatus,
+    Function(int completed, int total, double overallProgress)? onOverallProgress,
+    Function(Shot shot)? onShotComplete,
+    Function(Shot shot, Object error)? onShotError,
+  }) async {
+    final pendingShots = shots.where((s) => s.status != ShotStatus.completed).toList();
+    final total = pendingShots.length;
+    if (total == 0) return shots;
+
+    // 初始化所有待处理镜头状态
+    for (final shot in pendingShots) {
+      shot.status = ShotStatus.queued;
+      shot.progress = 0.0;
+      shot.error = null;
+    }
+
+    int completed = 0;
+    int currentIndex = 0;
+    final completedShots = <Shot>[];
+
+    Future<void> worker() async {
+      while (currentIndex < pendingShots.length) {
+        final shot = pendingShots[currentIndex++];
+        try {
+          await generateShotVideo(
+            shot,
+            style,
+            aspectRatio,
+            quality: quality,
+            onStatus: onStatus,
+            onProgress: (p) {
+              onOverallProgress?.call(
+                completed,
+                total,
+                (completed + p) / total,
+              );
+            },
+          );
+          completed++;
+          completedShots.add(shot);
+          onShotComplete?.call(shot);
+          onOverallProgress?.call(completed, total, completed / total);
+        } catch (e) {
+          completed++;
+          onShotError?.call(shot, e);
+          onOverallProgress?.call(completed, total, completed / total);
+        }
+      }
+    }
+
+    // 启动并发 worker
+    final workers = List.generate(
+      concurrency.clamp(1, 10),
+      (_) => worker(),
+    );
+    await Future.wait(workers);
+
+    return shots;
   }
 
   /// 合并多个视频为一个（通过原生 MediaMuxer 实现）
@@ -133,7 +219,6 @@ class VideoService {
     }
 
     if (videoPaths.length == 1) {
-      // 只有一个视频，直接复制
       final appDir = await getAppDir();
       final outputPath = '$appDir/$outputName';
       await File(videoPaths.first).copy(outputPath);
