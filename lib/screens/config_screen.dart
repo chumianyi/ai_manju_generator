@@ -2,6 +2,53 @@ import 'package:flutter/material.dart';
 import '../models/ai_config.dart';
 import '../services/storage_service.dart';
 
+/// 模型提供商预设
+class ModelProvider {
+  final String name;
+  final String baseUrl;
+  final List<String> recommendedModels;
+
+  const ModelProvider({
+    required this.name,
+    required this.baseUrl,
+    this.recommendedModels = const [],
+  });
+}
+
+/// 语言模型提供商预设
+const List<ModelProvider> _llmProviders = [
+  ModelProvider(name: '自定义', baseUrl: ''),
+  ModelProvider(name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', recommendedModels: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo']),
+  ModelProvider(name: '智谱AI / GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', recommendedModels: ['glm-4', 'glm-4-plus', 'glm-4-flash', 'glm-4-air']),
+  ModelProvider(name: 'Anthropic / Claude', baseUrl: 'https://api.anthropic.com/v1', recommendedModels: ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307']),
+  ModelProvider(name: 'Google / Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', recommendedModels: ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-1.0-pro']),
+  ModelProvider(name: '阿里 / 通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', recommendedModels: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long']),
+  ModelProvider(name: '百度 / 文心一言', baseUrl: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop', recommendedModels: ['ernie-4.0', 'ernie-3.5', 'ernie-speed']),
+  ModelProvider(name: '讯飞 / 星火', baseUrl: 'https://spark-api-open.xf-yun.com/v1', recommendedModels: ['generalv3.5', 'generalv3', 'generalv2']),
+  ModelProvider(name: '月之暗面 / Kimi', baseUrl: 'https://api.moonshot.cn/v1', recommendedModels: ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k']),
+  ModelProvider(name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', recommendedModels: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner']),
+  ModelProvider(name: '零一万物 / Yi', baseUrl: 'https://api.lingyiwanwu.com/v1', recommendedModels: ['yi-large', 'yi-medium', 'yi-spark']),
+  ModelProvider(name: '阶跃星辰', baseUrl: 'https://api.stepfun.com/v1', recommendedModels: ['step-1-8k', 'step-1-32k', 'step-1-128k']),
+  ModelProvider(name: 'MiniMax', baseUrl: 'https://api.minimax.chat/v1', recommendedModels: ['abab6.5s-chat', 'abab6.5-chat']),
+  ModelProvider(name: '腾讯 / 混元', baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1', recommendedModels: ['hunyuan-lite', 'hunyuan-standard', 'hunyuan-pro']),
+  ModelProvider(name: 'SiliconFlow / 硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', recommendedModels: ['Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-V2.5', 'meta-llama/Meta-Llama-3.1-405B-Instruct']),
+  ModelProvider(name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', recommendedModels: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'meta-llama/llama-3.1-405b-instruct']),
+];
+
+/// 视频模型提供商预设
+const List<ModelProvider> _videoProviders = [
+  ModelProvider(name: '自定义', baseUrl: ''),
+  ModelProvider(name: '可灵 / Kling', baseUrl: 'https://api.klingai.com/v1', recommendedModels: ['kling-v1', 'kling-v1-5']),
+  ModelProvider(name: '即梦 / Jimeng', baseUrl: 'https://api.jimeng.com/v1', recommendedModels: ['jimeng-v1']),
+  ModelProvider(name: 'Runway', baseUrl: 'https://api.runwayml.com/v1', recommendedModels: ['gen-3-alpha-turbo', 'gen-2']),
+  ModelProvider(name: 'Pika', baseUrl: 'https://api.pika.art/v1', recommendedModels: ['pika-1.0', 'pika-1.5']),
+  ModelProvider(name: 'OpenAI / Sora', baseUrl: 'https://api.openai.com/v1', recommendedModels: ['sora']),
+  ModelProvider(name: 'Vidu', baseUrl: 'https://api.vidu.cn/v1', recommendedModels: ['vidu-v1']),
+  ModelProvider(name: 'Pixverse', baseUrl: 'https://api.pixverse.ai/v1', recommendedModels: ['pixverse-v1']),
+  ModelProvider(name: '生数 / Vidu', baseUrl: 'https://api.vidu.studio/v1', recommendedModels: ['vidu-1.0']),
+  ModelProvider(name: '海螺 / Hailuo', baseUrl: 'https://api.hailuoai.com/v1', recommendedModels: ['hailuo-v1']),
+];
+
 /// AI 模型配置页面
 class ConfigScreen extends StatefulWidget {
   final AiConfig config;
@@ -21,7 +68,6 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
   late TabController _tabController;
   late AiConfig _config;
 
-  // 持久的输入控制器（在 initState 中创建，避免 build 中重复创建）
   late final TextEditingController _llmBaseUrlController;
   late final TextEditingController _llmModelController;
   late final TextEditingController _llmApiKeyController;
@@ -32,7 +78,9 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
   late final TextEditingController _imageModelController;
   late final TextEditingController _imageApiKeyController;
 
-  // Headers 编辑控制器
+  String _selectedLlmProvider = '自定义';
+  String _selectedVideoProvider = '自定义';
+
   final List<TextEditingController> _llmHeaderKeyControllers = [];
   final List<TextEditingController> _llmHeaderValueControllers = [];
   final List<TextEditingController> _videoHeaderKeyControllers = [];
@@ -46,7 +94,6 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     _tabController = TabController(length: 3, vsync: this);
     _config = AiConfig.fromJson(widget.config.toJson());
 
-    // 初始化所有输入控制器（只创建一次）
     _llmBaseUrlController = TextEditingController(text: _config.llmBaseUrl);
     _llmModelController = TextEditingController(text: _config.llmModel);
     _llmApiKeyController = TextEditingController(text: _config.llmApiKey);
@@ -57,7 +104,17 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     _imageModelController = TextEditingController(text: _config.imageModel);
     _imageApiKeyController = TextEditingController(text: _config.imageApiKey);
 
+    _selectedLlmProvider = _findProviderName(_llmProviders, _config.llmBaseUrl);
+    _selectedVideoProvider = _findProviderName(_videoProviders, _config.videoBaseUrl);
+
     _initHeaderControllers();
+  }
+
+  String _findProviderName(List<ModelProvider> providers, String url) {
+    for (final p in providers) {
+      if (p.baseUrl.isNotEmpty && url == p.baseUrl) return p.name;
+    }
+    return '自定义';
   }
 
   void _initHeaderControllers() {
@@ -96,8 +153,31 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     super.dispose();
   }
 
+  void _onLlmProviderChanged(String? name) {
+    if (name == null) return;
+    setState(() => _selectedLlmProvider = name);
+    final provider = _llmProviders.firstWhere((p) => p.name == name);
+    if (provider.baseUrl.isNotEmpty) {
+      _llmBaseUrlController.text = provider.baseUrl;
+    }
+    if (_llmModelController.text.isEmpty && provider.recommendedModels.isNotEmpty) {
+      _llmModelController.text = provider.recommendedModels.first;
+    }
+  }
+
+  void _onVideoProviderChanged(String? name) {
+    if (name == null) return;
+    setState(() => _selectedVideoProvider = name);
+    final provider = _videoProviders.firstWhere((p) => p.name == name);
+    if (provider.baseUrl.isNotEmpty) {
+      _videoBaseUrlController.text = provider.baseUrl;
+    }
+    if (_videoModelController.text.isEmpty && provider.recommendedModels.isNotEmpty) {
+      _videoModelController.text = provider.recommendedModels.first;
+    }
+  }
+
   void _saveConfig() {
-    // 从控制器读取值
     _config.llmBaseUrl = _llmBaseUrlController.text.trim();
     _config.llmModel = _llmModelController.text.trim();
     _config.llmApiKey = _llmApiKeyController.text.trim();
@@ -108,7 +188,6 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     _config.imageModel = _imageModelController.text.trim();
     _config.imageApiKey = _imageApiKeyController.text.trim();
 
-    // 收集 Headers
     _config.llmHeaders = {};
     for (var i = 0; i < _llmHeaderKeyControllers.length; i++) {
       final key = _llmHeaderKeyControllers[i].text.trim();
@@ -173,6 +252,31 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     );
   }
 
+  Widget _buildProviderDropdown({
+    required List<ModelProvider> providers,
+    required String value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: DropdownButtonFormField<String>(
+        value: value,
+        decoration: const InputDecoration(
+          labelText: '选择提供商',
+          prefixIcon: Icon(Icons.store),
+          border: OutlineInputBorder(),
+        ),
+        items: providers.map((p) {
+          return DropdownMenuItem<String>(
+            value: p.name,
+            child: Text(p.name),
+          );
+        }).toList(),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
   Widget _buildInputField({
     required TextEditingController controller,
     required String hintText,
@@ -193,25 +297,39 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     );
   }
 
-  // 语言模型配置
+  Widget _buildModelSuggestions(List<String> models, TextEditingController controller) {
+    if (models.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: models.map((m) {
+          return ActionChip(
+            label: Text(m, style: const TextStyle(fontSize: 12)),
+            onPressed: () => controller.text = m,
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _buildLlmConfig() {
+    final currentProvider = _llmProviders.firstWhere(
+      (p) => p.name == _selectedLlmProvider,
+      orElse: () => _llmProviders.first,
+    );
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('协议类型'),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'openai', label: Text('OpenAI 兼容')),
-              ButtonSegment(value: 'custom', label: Text('自定义')),
-            ],
-            selected: {_config.llmProtocol},
-            onSelectionChanged: (s) {
-              setState(() => _config.llmProtocol = s.first);
-            },
+          _buildProviderDropdown(
+            providers: _llmProviders,
+            value: _selectedLlmProvider,
+            onChanged: _onLlmProviderChanged,
           ),
-          const SizedBox(height: 24),
           _buildSectionTitle('API 地址'),
           _buildInputField(
             controller: _llmBaseUrlController,
@@ -221,9 +339,10 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
           _buildSectionTitle('模型名称'),
           _buildInputField(
             controller: _llmModelController,
-            hintText: 'gpt-4o / claude-3-5-sonnet / deepseek-chat',
+            hintText: 'gpt-4o / glm-4 / claude-3-5-sonnet',
             icon: Icons.smart_toy,
           ),
+          _buildModelSuggestions(currentProvider.recommendedModels, _llmModelController),
           _buildSectionTitle('API Key'),
           _buildInputField(
             controller: _llmApiKeyController,
@@ -263,25 +382,22 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     );
   }
 
-  // 视频模型配置
   Widget _buildVideoConfig() {
+    final currentProvider = _videoProviders.firstWhere(
+      (p) => p.name == _selectedVideoProvider,
+      orElse: () => _videoProviders.first,
+    );
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSectionTitle('协议类型'),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'openai', label: Text('OpenAI 兼容')),
-              ButtonSegment(value: 'custom', label: Text('自定义')),
-            ],
-            selected: {_config.videoProtocol},
-            onSelectionChanged: (s) {
-              setState(() => _config.videoProtocol = s.first);
-            },
+          _buildProviderDropdown(
+            providers: _videoProviders,
+            value: _selectedVideoProvider,
+            onChanged: _onVideoProviderChanged,
           ),
-          const SizedBox(height: 24),
           _buildSectionTitle('API 地址'),
           _buildInputField(
             controller: _videoBaseUrlController,
@@ -291,9 +407,10 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
           _buildSectionTitle('模型名称'),
           _buildInputField(
             controller: _videoModelController,
-            hintText: 'sora / kling / cogvideo',
+            hintText: 'kling-v1 / sora / gen-3',
             icon: Icons.movie,
           ),
+          _buildModelSuggestions(currentProvider.recommendedModels, _videoModelController),
           _buildSectionTitle('API Key'),
           _buildInputField(
             controller: _videoApiKeyController,
@@ -326,7 +443,6 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     );
   }
 
-  // 图片模型配置
   Widget _buildImageConfig() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -386,7 +502,6 @@ class _ConfigScreenState extends State<ConfigScreen> with SingleTickerProviderSt
     );
   }
 
-  // Headers 管理区域
   Widget _buildHeadersSection({
     required List<TextEditingController> keyControllers,
     required List<TextEditingController> valueControllers,

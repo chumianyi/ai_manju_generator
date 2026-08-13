@@ -112,7 +112,10 @@ class AiService {
       'max_tokens': 16384,
     });
 
-    final uri = Uri.parse('${config.llmBaseUrl}/chat/completions');
+    final baseUrl = config.llmBaseUrl.endsWith('/')
+        ? config.llmBaseUrl.substring(0, config.llmBaseUrl.length - 1)
+        : config.llmBaseUrl;
+    final uri = Uri.parse('$baseUrl/chat/completions');
     final headers = _buildHeaders();
 
     final request = http.Request('POST', uri);
@@ -263,7 +266,10 @@ class AiService {
     required String aspectRatio,
     String? style,
   }) async {
-    final uri = Uri.parse('${config.videoBaseUrl}/videos/generations');
+    final baseUrl = config.videoBaseUrl.endsWith('/')
+        ? config.videoBaseUrl.substring(0, config.videoBaseUrl.length - 1)
+        : config.videoBaseUrl;
+    final uri = Uri.parse('$baseUrl/videos/generations');
     final headers = _buildHeaders(forVideo: true);
     headers['Accept'] = 'application/json';
 
@@ -293,7 +299,10 @@ class AiService {
 
   /// 查询视频生成任务状态
   Future<Map<String, dynamic>> getVideoTaskStatus(String taskId) async {
-    final uri = Uri.parse('${config.videoBaseUrl}/videos/generations/$taskId');
+    final baseUrl = config.videoBaseUrl.endsWith('/')
+        ? config.videoBaseUrl.substring(0, config.videoBaseUrl.length - 1)
+        : config.videoBaseUrl;
+    final uri = Uri.parse('$baseUrl/videos/generations/$taskId');
     final headers = _buildHeaders(forVideo: true);
     headers['Accept'] = 'application/json';
 
