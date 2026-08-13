@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter/return_code.dart';
-import 'package:gal/gal.dart';
+import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import '../models/shot.dart';
 import 'ai_service.dart';
 
@@ -172,8 +172,8 @@ class VideoService {
   /// 保存视频到相册
   Future<bool> saveToGallery(String videoPath) async {
     try {
-      await Gal.putVideo(videoPath);
-      return true;
+      final result = await ImageGallerySaverPlus.saveFile(videoPath);
+      return result['isSuccess'] == true;
     } catch (e) {
       throw Exception('保存到相册失败: $e');
     }

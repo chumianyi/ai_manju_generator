@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:gal/gal.dart';
+import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 import '../widgets/video_player_widget.dart';
 
 /// 视频详情/放大查看页面
@@ -24,10 +24,11 @@ class _VideoDetailScreenState extends State<VideoDetailScreen> {
   Future<void> _saveToGallery() async {
     setState(() => _isSaving = true);
     try {
-      await Gal.putVideo(widget.videoPath);
+      final result = await ImageGallerySaverPlus.saveFile(widget.videoPath);
+      final success = result['isSuccess'] == true;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已保存到相册')),
+          SnackBar(content: Text(success ? '已保存到相册' : '保存失败')),
         );
       }
     } catch (e) {
