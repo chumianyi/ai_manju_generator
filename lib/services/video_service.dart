@@ -66,6 +66,8 @@ class VideoService {
       // 3. 获取视频URL（不同API返回格式不同，做兼容处理）
       String? videoUrl;
       String? taskId;
+      final isZhipu = aiService.config.videoBaseUrl.contains('bigmodel.cn');
+
       if (result['data'] != null && result['data'] is List) {
         final data = result['data'][0];
         videoUrl = data['url'] ?? data['video_url'];
@@ -75,38 +77,57 @@ class VideoService {
       } else if (result['url'] != null) {
         videoUrl = result['url'];
       } else if (result['id'] != null) {
+        // 智谱返回 id 作为任务ID
         taskId = result['id'];
       }
 
       // 4. 如果是异步任务，轮询状态
       if (videoUrl == null && taskId != null) {
         onStatus?.call('视频生成中，请稍候...');
-        for (var i = 0; i < 60; i++) {
-          await Future.delayed(const Duration(seconds: 5));
+        // 智谱视频生成较慢，增加轮询次数和间隔
+        final maxPolls = isZhipu ? 120 : 60;
+        final pollInterval = isZhipu ? 3 : 5;
+
+        for (var i = 0; i < maxPolls; i++) {
+          await Future.delayed(Duration(seconds: pollInterval));
           try {
             final status = await aiService.getVideoTaskStatus(taskId);
-            final state = status['status'] ?? status['state'];
+            // 兼容多种状态字段：智谱用 task_status，其他用 status/state
+            final state = status['task_status'] ?? status['status'] ?? status['state'];
+            final stateLower = state?.toString().toLowerCase();
+
             // 尝试从API获取真实进度
             final apiProgress = status['progress'] ?? status['percent'] ?? status['percentage'];
             if (apiProgress != null && apiProgress is num) {
               shot.progress = 0.4 + (apiProgress / 100) * 0.5;
             } else {
-              shot.progress = 0.4 + (i / 60) * 0.5;
+              shot.progress = 0.4 + (i / maxPolls) * 0.5;
             }
             onProgress?.call(shot.progress);
 
-            if (state == 'succeeded' || state == 'completed' || state == 'success') {
-              if (status['data'] != null && status['data'] is List) {
+            // 成功状态：兼容多种写法
+            if (stateLower == 'success' || stateLower == 'succeeded' ||
+                stateLower == 'completed' || state == 'SUCCESS') {
+              // 智谱：video_result[0].url
+              if (status['video_result'] != null && status['video_result'] is List) {
+                videoUrl = status['video_result'][0]['url'];
+              } else if (status['data'] != null && status['data'] is List) {
                 videoUrl = status['data'][0]['url'];
               } else {
                 videoUrl = status['video_url'] ?? status['url'];
               }
               break;
-            } else if (state == 'failed' || state == 'error') {
-              throw Exception('视频生成任务失败');
+            } else if (stateLower == 'fail' || stateLower == 'failed' ||
+                stateLower == 'error' || state == 'FAIL') {
+              // 智谱失败时可能有 error 字段
+              final errorMsg = status['error']?['message'] ?? status['error_message'] ?? '视频生成任务失败';
+              throw Exception(errorMsg);
             }
           } catch (e) {
-            // 继续轮询
+            if (e.toString().contains('视频生成任务失败') || e.toString().contains('FAIL')) {
+              rethrow;
+            }
+            // 网络错误等继续轮询
           }
         }
       }

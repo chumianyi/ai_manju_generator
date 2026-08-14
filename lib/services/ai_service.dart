@@ -387,7 +387,22 @@ class AiService {
 
   /// 调用视频模型生成视频
   /// 根据比例和清晰度计算分辨率
+  /// 判断是否为智谱视频模型
+  bool get _isZhipuVideo => config.videoBaseUrl.contains('bigmodel.cn');
+
+  /// 智谱支持的分辨率枚举
+  String _zhipuResolution(String aspectRatio, String quality) {
+    final resolutions = {
+      '480p': {'9:16': '720x1280', '16:9': '1280x720', '1:1': '1024x1024'},
+      '720p': {'9:16': '720x1280', '16:9': '1280x720', '1:1': '1024x1024'},
+      '1080p': {'9:16': '1080x1920', '16:9': '1920x1080', '1:1': '1024x1024'},
+      '4K': {'9:16': '1080x1920', '16:9': '3840x2160', '1:1': '1024x1024'},
+    };
+    return resolutions[quality]?[aspectRatio] ?? '720x1280';
+  }
+
   String _calcResolution(String aspectRatio, String quality) {
+    if (_isZhipuVideo) return _zhipuResolution(aspectRatio, quality);
     final resolutions = {
       '480p': {'9:16': '480x854', '16:9': '854x480', '1:1': '480x480'},
       '720p': {'9:16': '720x1280', '16:9': '1280x720', '1:1': '720x720'},
@@ -410,13 +425,22 @@ class AiService {
     final headers = _buildHeaders(forVideo: true);
     headers['Accept'] = 'application/json';
 
-    final body = jsonEncode({
+    final bodyMap = <String, dynamic>{
       'model': config.videoModel,
       'prompt': prompt,
       'size': _calcResolution(aspectRatio, quality),
-      'quality': quality,
-      if (style != null) 'style': style,
-    });
+    };
+
+    if (_isZhipuVideo) {
+      // 智谱特有参数
+      bodyMap['quality'] = 'quality'; // 质量优先
+      bodyMap['duration'] = 5;
+    } else {
+      bodyMap['quality'] = quality;
+      if (style != null) bodyMap['style'] = style;
+    }
+
+    final body = jsonEncode(bodyMap);
 
     final response = await http.post(
       uri,
@@ -436,7 +460,11 @@ class AiService {
     final baseUrl = config.videoBaseUrl.endsWith('/')
         ? config.videoBaseUrl.substring(0, config.videoBaseUrl.length - 1)
         : config.videoBaseUrl;
-    final uri = Uri.parse('$baseUrl/videos/generations/$taskId');
+
+    // 智谱使用 async-result 接口
+    final uri = _isZhipuVideo
+        ? Uri.parse('$baseUrl/async-result/$taskId')
+        : Uri.parse('$baseUrl/videos/generations/$taskId');
     final headers = _buildHeaders(forVideo: true);
     headers['Accept'] = 'application/json';
 

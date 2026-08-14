@@ -38,6 +38,7 @@ const List<ModelProvider> _llmProviders = [
 /// 视频模型提供商预设
 const List<ModelProvider> _videoProviders = [
   ModelProvider(name: '自定义', baseUrl: ''),
+  ModelProvider(name: '智谱 / CogVideoX', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', recommendedModels: ['cogvideox-3', 'cogvideox', 'cogvideox-flash']),
   ModelProvider(name: '可灵 / Kling', baseUrl: 'https://api.klingai.com/v1', recommendedModels: ['kling-v1', 'kling-v1-5']),
   ModelProvider(name: '即梦 / Jimeng', baseUrl: 'https://api.jimeng.com/v1', recommendedModels: ['jimeng-v1']),
   ModelProvider(name: 'Runway', baseUrl: 'https://api.runwayml.com/v1', recommendedModels: ['gen-3-alpha-turbo', 'gen-2']),
